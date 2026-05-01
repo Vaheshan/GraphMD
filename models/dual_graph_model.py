@@ -95,7 +95,12 @@ class MultiscaleMDGNN(nn.Module):
 
         # Readout and prediction head
         self.readout = AttentionPoolingReadout(hidden_dim=atom_hidden_dim, top_k=top_k)
-        self.head = PredictionMLP(in_dim=atom_hidden_dim)
+        self.head = PredictionMLP(
+            in_dim=atom_hidden_dim,
+            hidden_dims=[256, 128],
+            dropout=dropout,
+            use_layer_norm=True,
+        )
 
     def build_graphs_from_complex(
         self, complex_inputs: ComplexInputs

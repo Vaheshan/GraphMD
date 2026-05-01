@@ -24,16 +24,28 @@ class Trainer:
         optimizer: Optimizer,
         lambda_temp: float = 0.0,
         alpha_multitask: float = 0.0,
+        affinity_loss: str = "smooth_l1",
+        grad_clip_norm: Optional[float] = 1.0,
         device: Optional[torch.device] = None,
     ) -> None:
         self.model = model
         self.optimizer = optimizer
         self.lambda_temp = float(lambda_temp)
         self.alpha_multitask = float(alpha_multitask)
+        self.grad_clip_norm = grad_clip_norm
         self.device = device or torch.device("cpu")
         self.model.to(self.device)
 
         self.mse_loss = nn.MSELoss()
+        if affinity_loss == "mse":
+            self.affinity_loss = self.mse_loss
+        elif affinity_loss == "smooth_l1":
+            # Robust to label noise/outliers while still regressing a scalar target.
+            self.affinity_loss = nn.SmoothL1Loss(beta=0.5)
+        else:
+            raise ValueError(
+                f"Unsupported affinity_loss '{affinity_loss}'. Use 'mse' or 'smooth_l1'."
+            )
 
     def _move_graph_batch(self, batch: GraphBatch) -> GraphBatch:
         batch.protein = batch.protein.to(self.device)
@@ -100,6 +112,8 @@ class Trainer:
 
         loss = L_stability + self.lambda_temp * L_temp
         loss.backward()
+        if self.grad_clip_norm is not None and self.grad_clip_norm > 0:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
         self.optimizer.step()
 
         return {
@@ -133,7 +147,7 @@ class Trainer:
         y_pred_aff = out["y_pred"].view(-1)
         y_true_aff = batch.labels["y_affinity"].view(-1)
 
-        L_affinity = self.mse_loss(y_pred_aff, y_true_aff)
+        L_affinity = self.affinity_loss(y_pred_aff, y_true_aff)
         L_stability = torch.tensor(0.0, device=self.device)
 
         if multitask and "y_stability" in batch.labels:
@@ -144,6 +158,8 @@ class Trainer:
 
         loss = L_affinity + self.alpha_multitask * L_stability
         loss.backward()
+        if self.grad_clip_norm is not None and self.grad_clip_norm > 0:
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.grad_clip_norm)
         self.optimizer.step()
 
         return {

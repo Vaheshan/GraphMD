@@ -85,6 +85,8 @@ class PocketGNNEncoder(nn.Module):
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
+        self.in_dim = int(in_dim)
+        self.hidden_dim = int(hidden_dim)
         self.input_proj = nn.Linear(in_dim, hidden_dim)
         self.layers = nn.ModuleList(
             [
@@ -105,7 +107,16 @@ class PocketGNNEncoder(nn.Module):
         Returns:
             Atom embeddings of shape (A, hidden_dim).
         """
-        x = self.input_proj(data.x)
+        # Support both raw atom features (F_atom) and already-projected hidden states.
+        if data.x.size(-1) == self.hidden_dim:
+            x = data.x
+        elif data.x.size(-1) == self.in_dim:
+            x = self.input_proj(data.x)
+        else:
+            raise ValueError(
+                f"PocketGNNEncoder expected input dim {self.in_dim} or {self.hidden_dim}, "
+                f"but got {data.x.size(-1)}."
+            )
         edge_index = data.edge_index
         edge_attr = data.edge_attr
 

@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from torch import nn, Tensor
 
@@ -13,11 +13,13 @@ class PredictionMLP(nn.Module):
     def __init__(
         self,
         in_dim: int,
-        hidden_dims: List[int] = [256, 128],
+        hidden_dims: Optional[List[int]] = None,
         dropout: float = 0.0,
         use_layer_norm: bool = False,
     ) -> None:
         super().__init__()
+        if hidden_dims is None:
+            hidden_dims = [256, 128]
         layers = []
         d_in = in_dim
         for d_hidden in hidden_dims:

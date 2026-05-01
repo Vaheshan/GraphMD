@@ -81,11 +81,9 @@ class CrossGraphAttentionModule(nn.Module):
                 atom_to_residue_b = atom_to_residue[atom_idx_b]
                 valid_res = atom_to_residue_b[atom_to_residue_b >= 0]
                 if valid_res.numel() > 0:
-                    res_from_atoms = torch.unique(valid_res)
-                    # Intersect with residues in this batch
-                    res_idx_b = torch.unique(
-                        torch.cat([res_idx_b, res_from_atoms.to(res_idx_b.device)])
-                    )
+                    # Keep only valid mapped residues that belong to this complex.
+                    in_batch = residue_batch[valid_res] == b
+                    res_idx_b = torch.unique(valid_res[in_batch])
 
             Q_b = Q[atom_idx_b]  # (A_b, H)
             K_b = K[res_idx_b]  # (R_b, H)
