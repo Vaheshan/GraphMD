@@ -21,7 +21,7 @@ class AttentionPoolingReadout(nn.Module):
     def __init__(
         self,
         hidden_dim: int,
-        top_k: int = 16,
+        top_k: int = 24,
     ) -> None:
         super().__init__()
         self.top_k = int(top_k)
@@ -74,13 +74,8 @@ class AttentionPoolingReadout(nn.Module):
             ).indices
             selected_protein = protein_idx_b[topk_protein]
 
-            # Ligand atoms closest to protein centroid
-            dist_ligand = torch.cdist(ligand_coords, protein_centroid).squeeze(-1)
-            k_ligand = min(self.top_k, ligand_idx_b.numel())
-            topk_ligand = torch.topk(
-                dist_ligand, k=k_ligand, largest=False
-            ).indices
-            selected_ligand = ligand_idx_b[topk_ligand]
+            # Keep all ligand atoms so ligand-specific interaction signal is not dropped.
+            selected_ligand = ligand_idx_b
 
             selected_b = torch.unique(torch.cat([selected_protein, selected_ligand]))
             selected_indices.append(selected_b)
@@ -125,11 +120,11 @@ class AttentionPoolingReadout(nn.Module):
         h_sel = h[selected_idx]  # (S, D)
         batch_sel = batch[selected_idx]
 
-        # Attention scores
+        # Attention scores on selected atoms.
         proj = torch.tanh(self.proj(h_sel))  # (S, D)
         scores = (proj * self.vector).sum(dim=-1)  # (S,)
 
-        # Softmax per batch
+        # Softmax per batch.
         B = int(batch.max().item()) + 1
         Z = torch.zeros((B, h.size(-1)), device=device, dtype=h.dtype)
         for b in range(B):
@@ -140,7 +135,15 @@ class AttentionPoolingReadout(nn.Module):
             scores_b = scores[idx_b]
             h_b = h_sel[idx_b]
             alpha_b = torch.softmax(scores_b, dim=0).unsqueeze(-1)
-            Z[b] = (alpha_b * h_b).sum(dim=0)
+            z_attn = (alpha_b * h_b).sum(dim=0)
+
+            # Blend in full-ligand mean embedding as a stable interaction anchor.
+            ligand_mask_b = (batch == b) & is_ligand
+            if ligand_mask_b.any():
+                z_lig = h[ligand_mask_b].mean(dim=0)
+                Z[b] = 0.7 * z_attn + 0.3 * z_lig
+            else:
+                Z[b] = z_attn
 
         return Z
 

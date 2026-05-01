@@ -2,6 +2,7 @@ from typing import Optional
 
 import torch
 from torch import nn, Tensor
+import torch.nn.functional as F
 
 
 class CrossGraphAttentionModule(nn.Module):
@@ -94,7 +95,8 @@ class CrossGraphAttentionModule(nn.Module):
             alpha = torch.softmax(scores, dim=-1)  # (A_b, R_b)
             ctx = alpha @ V_b  # (A_b, D_a)
 
-            out[atom_idx_b] = out[atom_idx_b] + ctx
+            # Layer-normalized residual improves stability across complexes.
+            out[atom_idx_b] = F.layer_norm(out[atom_idx_b] + ctx, (out.size(-1),))
 
         return out
 

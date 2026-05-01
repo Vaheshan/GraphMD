@@ -61,7 +61,7 @@ class MultiscaleMDGNN(nn.Module):
         atom_hidden_dim: int = 128,
         protein_layers: int = 3,
         pocket_layers: int = 5,
-        top_k: int = 16,
+        top_k: int = 24,
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
