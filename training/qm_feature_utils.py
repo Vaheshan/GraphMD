@@ -1,7 +1,8 @@
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import h5py
 import numpy as np
+import pandas as pd
 import torch
 
 
@@ -40,6 +41,7 @@ def _extract_qm_features_from_group(mol_group) -> Dict[str, float]:
 def build_qm_feature_table(
     qmh5_file: str,
     selected_pdb_ids: List[str],
+    selected_feature_names: Optional[List[str]] = None,
 ) -> Tuple[Dict[str, np.ndarray], List[str]]:
     """
     Build fixed-order QM feature vectors per pdb-id.
@@ -60,6 +62,9 @@ def build_qm_feature_table(
             all_names.update(row.keys())
 
     feature_names = sorted(all_names)
+    if selected_feature_names is not None:
+        requested = set(selected_feature_names)
+        feature_names = [name for name in feature_names if name in requested]
     table: Dict[str, np.ndarray] = {}
     for pdb_id, row in raw_rows.items():
         vec = np.array([row.get(name, 0.0) for name in feature_names], dtype=np.float32)
@@ -67,6 +72,32 @@ def build_qm_feature_table(
         table[pdb_id] = vec
 
     return table, feature_names
+
+
+def load_selected_features_from_correlation_csv(
+    correlation_csv_path: str,
+    min_abs_corr: Optional[float] = None,
+    top_k: Optional[int] = None,
+) -> List[str]:
+    """
+    Load selected QM feature names from correlation CSV.
+
+    The CSV is expected to contain columns: 'feature', 'pearson_r'.
+    """
+    df = pd.read_csv(correlation_csv_path)
+    if "feature" not in df.columns or "pearson_r" not in df.columns:
+        raise ValueError(
+            "Correlation CSV must contain 'feature' and 'pearson_r' columns."
+        )
+
+    df = df.copy()
+    df["abs_corr"] = df["pearson_r"].abs()
+    if min_abs_corr is not None:
+        df = df[df["abs_corr"] >= float(min_abs_corr)]
+    df = df.sort_values("abs_corr", ascending=False)
+    if top_k is not None:
+        df = df.head(int(top_k))
+    return [str(x) for x in df["feature"].tolist()]
 
 
 def make_qm_tensor_for_batch(
