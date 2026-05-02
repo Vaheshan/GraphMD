@@ -75,7 +75,10 @@ class Trainer:
 
         for fb in frame_batches:
             fb = self._move_graph_batch(fb)
-            out = self.model({"protein": fb.protein, "pocket": fb.pocket}, return_latent=True)
+            out = self.model(
+                {"protein": fb.protein, "pocket": fb.pocket},
+                return_latent=True,
+            )
             y_pred = out["y_pred"].view(-1)
             Z = out["Z"]  # (B, D)
             y_true = fb.labels["y_stability"].view(-1)
@@ -128,7 +131,10 @@ class Trainer:
         self.optimizer.zero_grad()
 
         batch = self._move_graph_batch(batch)
-        out = self.model({"protein": batch.protein, "pocket": batch.pocket}, return_latent=False)
+        model_inputs = {"protein": batch.protein, "pocket": batch.pocket}
+        if "qm_features" in batch.labels:
+            model_inputs["qm_features"] = batch.labels["qm_features"]
+        out = self.model(model_inputs, return_latent=False)
 
         y_pred_aff = out["y_pred"].view(-1)
         y_true_aff = batch.labels["y_affinity"].view(-1)

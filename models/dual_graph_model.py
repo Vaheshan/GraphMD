@@ -16,7 +16,7 @@ from .protein_encoder import ProteinGNNEncoder
 from .pocket_encoder import PocketGNNEncoder
 from .cross_attention import CrossGraphAttentionModule
 from .readout import AttentionPoolingReadout
-from .head import PredictionMLP
+from .head import PredictionMLP, QuantumFeatureEncoder
 
 
 @dataclass
@@ -63,8 +63,13 @@ class MultiscaleMDGNN(nn.Module):
         pocket_layers: int = 5,
         top_k: int = 16,
         dropout: float = 0.0,
+        use_qm_features_for_finetune: bool = False,
+        qm_feature_dim: int = 0,
+        qm_encoded_dim: int = 64,
     ) -> None:
         super().__init__()
+        self.use_qm_features_for_finetune = bool(use_qm_features_for_finetune)
+        self.qm_feature_dim = int(qm_feature_dim)
 
         # Graph builders
         self.protein_builder = ProteinGraphBuilder()
@@ -95,7 +100,22 @@ class MultiscaleMDGNN(nn.Module):
 
         # Readout and prediction head
         self.readout = AttentionPoolingReadout(hidden_dim=atom_hidden_dim, top_k=top_k)
-        self.head = PredictionMLP(in_dim=atom_hidden_dim)
+        self.qm_encoder: Optional[QuantumFeatureEncoder]
+        head_in_dim = atom_hidden_dim
+        if self.use_qm_features_for_finetune:
+            if self.qm_feature_dim <= 0:
+                raise ValueError(
+                    "qm_feature_dim must be > 0 when use_qm_features_for_finetune=True"
+                )
+            self.qm_encoder = QuantumFeatureEncoder(
+                in_dim=self.qm_feature_dim,
+                out_dim=qm_encoded_dim,
+                dropout=dropout,
+            )
+            head_in_dim += qm_encoded_dim
+        else:
+            self.qm_encoder = None
+        self.head = PredictionMLP(in_dim=head_in_dim)
 
     def build_graphs_from_complex(
         self, complex_inputs: ComplexInputs
@@ -173,7 +193,21 @@ class MultiscaleMDGNN(nn.Module):
             is_ligand=pocket_batch.is_ligand,
         )
 
-        y_pred = self.head(Z)
+        if self.use_qm_features_for_finetune:
+            qm_features = batch.get("qm_features", None)
+            if qm_features is None:
+                qm_features = torch.zeros(
+                    (Z.size(0), self.qm_feature_dim), device=Z.device, dtype=Z.dtype
+                )
+            elif qm_features.dim() == 1:
+                qm_features = qm_features.unsqueeze(0)
+            qm_features = qm_features.to(device=Z.device, dtype=Z.dtype)
+            qm_encoded = self.qm_encoder(qm_features)
+            Z_head = torch.cat([Z, qm_encoded], dim=-1)
+        else:
+            Z_head = Z
+
+        y_pred = self.head(Z_head)
 
         out = {"y_pred": y_pred}
         if return_latent:

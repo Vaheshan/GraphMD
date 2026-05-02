@@ -3,6 +3,37 @@ from typing import List
 from torch import nn, Tensor
 
 
+class QuantumFeatureEncoder(nn.Module):
+    """
+    Small MLP encoder for molecular quantum descriptors.
+
+    The encoded output is concatenated with graph pooled embedding before the
+    final prediction head during fine-tuning.
+    """
+
+    def __init__(
+        self,
+        in_dim: int,
+        out_dim: int,
+        hidden_dims: List[int] = [128, 64],
+        dropout: float = 0.0,
+    ) -> None:
+        super().__init__()
+        layers = []
+        d_in = in_dim
+        for d_hidden in hidden_dims:
+            layers.append(nn.Linear(d_in, d_hidden))
+            layers.append(nn.ReLU())
+            if dropout > 0.0:
+                layers.append(nn.Dropout(dropout))
+            d_in = d_hidden
+        layers.append(nn.Linear(d_in, out_dim))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, qm_features: Tensor) -> Tensor:
+        return self.net(qm_features)
+
+
 class PredictionMLP(nn.Module):
     """
     Simple configurable MLP prediction head.
