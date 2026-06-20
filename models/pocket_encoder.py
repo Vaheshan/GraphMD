@@ -79,7 +79,7 @@ class PocketGNNEncoder(nn.Module):
     def __init__(
         self,
         in_dim: int,
-        hidden_dim: int = 128,
+        hidden_dim: int = 32,
         edge_dim: int = 9,
         num_layers: int = 5,
         dropout: float = 0.0,

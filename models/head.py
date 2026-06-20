@@ -15,7 +15,7 @@ class QuantumFeatureEncoder(nn.Module):
         self,
         in_dim: int,
         out_dim: int,
-        hidden_dims: List[int] = [128, 64],
+        hidden_dims: List[int] = [32, 16],
         dropout: float = 0.0,
     ) -> None:
         super().__init__()
@@ -44,7 +44,7 @@ class PredictionMLP(nn.Module):
     def __init__(
         self,
         in_dim: int,
-        hidden_dims: List[int] = [256, 128],
+        hidden_dims: List[int] = [64, 32],
         dropout: float = 0.0,
         use_layer_norm: bool = False,
     ) -> None:

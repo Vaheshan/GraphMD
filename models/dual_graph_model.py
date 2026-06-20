@@ -57,8 +57,8 @@ class MultiscaleMDGNN(nn.Module):
     def __init__(
         self,
         atom_feature_dim: int,
-        residue_hidden_dim: int = 128,
-        atom_hidden_dim: int = 128,
+        residue_hidden_dim: int = 32,
+        atom_hidden_dim: int = 32,
         protein_layers: int = 3,
         pocket_layers: int = 5,
         top_k: int = 16,
