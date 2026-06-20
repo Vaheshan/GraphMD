@@ -98,6 +98,22 @@ class ProteinGNNEncoder(nn.Module):
             ]
         )
 
+    def project(self, data: Data) -> Tensor:
+        """Project raw node features to hidden_dim."""
+        return self.input_proj(data.x)
+
+    def apply_layer(
+        self,
+        layer_idx: int,
+        x: Tensor,
+        edge_index: Tensor,
+        edge_attr: Tensor,
+    ) -> Tensor:
+        """Run a single message-passing layer on already-projected embeddings."""
+        return self.layers[layer_idx](
+            x=x, edge_index=edge_index, edge_attr=edge_attr
+        )
+
     def forward(self, data: Data) -> Tensor:
         """
         Args:
@@ -106,7 +122,7 @@ class ProteinGNNEncoder(nn.Module):
         Returns:
             Residue embeddings of shape (R, hidden_dim).
         """
-        x = self.input_proj(data.x)
+        x = self.project(data)
         edge_index = data.edge_index
         edge_attr = data.edge_attr
 

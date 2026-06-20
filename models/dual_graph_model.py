@@ -43,11 +43,11 @@ class MultiscaleMDGNN(nn.Module):
 
     High-level flow per batch:
 
-        1. Protein graph message passing on residue graph.
-        2. Cross-graph residue → atom attention to inject global context.
-        3. Pocket graph message passing on atom graph.
-        4. Top-K + attention pooling over selected pocket/ligand atoms.
-        5. MLP head to predict a scalar property (e.g., stability or affinity).
+        For each of num_layers refinement steps:
+            1. One protein residue-graph message-passing layer.
+            2. Cross-graph residue → atom attention.
+            3. One pocket atom-graph message-passing layer.
+        Then Top-K + attention pooling and an MLP prediction head.
 
     This module expects callers to provide already-built batched graphs via
     torch_geometric.data.Batch objects. See the example usage at the bottom of
@@ -59,8 +59,9 @@ class MultiscaleMDGNN(nn.Module):
         atom_feature_dim: int,
         residue_hidden_dim: int = 32,
         atom_hidden_dim: int = 32,
-        protein_layers: int = 3,
-        pocket_layers: int = 5,
+        num_layers: int = 5,
+        protein_layers: Optional[int] = None,
+        pocket_layers: Optional[int] = None,
         top_k: int = 16,
         dropout: float = 0.0,
         use_qm_features_for_finetune: bool = False,
@@ -70,6 +71,18 @@ class MultiscaleMDGNN(nn.Module):
         super().__init__()
         self.use_qm_features_for_finetune = bool(use_qm_features_for_finetune)
         self.qm_feature_dim = int(qm_feature_dim)
+
+        if protein_layers is not None and pocket_layers is not None:
+            if protein_layers != pocket_layers:
+                raise ValueError(
+                    "protein_layers and pocket_layers must match for interleaved forward"
+                )
+            num_layers = protein_layers
+        elif protein_layers is not None:
+            num_layers = protein_layers
+        elif pocket_layers is not None:
+            num_layers = pocket_layers
+        self.num_layers = int(num_layers)
 
         # Graph builders
         self.protein_builder = ProteinGraphBuilder()
@@ -81,14 +94,14 @@ class MultiscaleMDGNN(nn.Module):
             in_dim=9,
             hidden_dim=residue_hidden_dim,
             edge_dim=4,
-            num_layers=protein_layers,
+            num_layers=self.num_layers,
             dropout=dropout,
         )
         self.pocket_encoder = PocketGNNEncoder(
             in_dim=atom_feature_dim,
             hidden_dim=atom_hidden_dim,
             edge_dim=9,
-            num_layers=pocket_layers,
+            num_layers=self.num_layers,
             dropout=dropout,
         )
 
@@ -165,29 +178,39 @@ class MultiscaleMDGNN(nn.Module):
         protein_batch: Batch = batch["protein"]
         pocket_batch: Batch = batch["pocket"]
 
-        # Protein encoder
-        H_res = self.protein_encoder(protein_batch)  # (R_total, D_r)
+        H_res = self.protein_encoder.project(protein_batch)  # (R_total, D_r)
+        H_atoms = self.pocket_encoder.project(pocket_batch)  # (A_total, D_a)
 
-        # Initial pocket encoder (local atom context)
-        H_atoms = self.pocket_encoder(pocket_batch)  # (A_total, D_a)
+        protein_edge_index = protein_batch.edge_index
+        protein_edge_attr = protein_batch.edge_attr
+        pocket_edge_index = pocket_batch.edge_index
+        pocket_edge_attr = pocket_batch.edge_attr
+        atom_to_residue = getattr(pocket_batch, "atom_to_residue", None)
 
-        # Cross-graph attention (residue → atom)
-        H_atoms_ctx = self.cross_attention(
-            atom_h=H_atoms,
-            residue_h=H_res,
-            atom_batch=pocket_batch.batch,
-            residue_batch=protein_batch.batch,
-            atom_to_residue=getattr(pocket_batch, "atom_to_residue", None),
-        )
-
-        # Optional second pass of pocket message passing on context-enriched atoms
-        pocket_batch_enriched = pocket_batch.clone()
-        pocket_batch_enriched.x = H_atoms_ctx
-        H_atoms_final = self.pocket_encoder(pocket_batch_enriched)
+        for layer_idx in range(self.num_layers):
+            H_res = self.protein_encoder.apply_layer(
+                layer_idx,
+                H_res,
+                protein_edge_index,
+                protein_edge_attr,
+            )
+            H_atoms = self.cross_attention(
+                atom_h=H_atoms,
+                residue_h=H_res,
+                atom_batch=pocket_batch.batch,
+                residue_batch=protein_batch.batch,
+                atom_to_residue=atom_to_residue,
+            )
+            H_atoms = self.pocket_encoder.apply_layer(
+                layer_idx,
+                H_atoms,
+                pocket_edge_index,
+                pocket_edge_attr,
+            )
 
         # Readout over pocket atoms
         Z = self.readout(
-            h=H_atoms_final,
+            h=H_atoms,
             coords=pocket_batch.pos,
             batch=pocket_batch.batch,
             is_ligand=pocket_batch.is_ligand,
